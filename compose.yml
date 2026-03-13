@@ -16,6 +16,12 @@ services:
     environment:
       # Timezone
       - TZ=${CCAT_TIMEZONE:-UTC}
+      - CCAT_VECTOR_DB=postgresql
+      - CCAT_POSTGRESQL_HOST=host.docker.internal
+      - CCAT_POSTGRESQL_PORT=5433
+      - CCAT_POSTGRESQL_USER=postgres
+      - CCAT_POSTGRESQL_PASSWORD=password
+      - CCAT_POSTGRESQL_DB=vectordb
     volumes:
       - ./core:/app
     command:
