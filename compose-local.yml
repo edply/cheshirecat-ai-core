@@ -4,6 +4,7 @@ services:
   cheshire-cat-core:
     build:
       context: ./core
+      dockerfile: Dockerfile-local
     container_name: cheshire_cat_core
     # Uncomment the two lines below to use your .env (see .env.example)
     # env_file:
@@ -16,10 +17,23 @@ services:
     environment:
       # Timezone
       - TZ=${CCAT_TIMEZONE:-UTC}
+      - CCAT_VECTOR_DB=postgresql
+      - CCAT_POSTGRESQL_HOST=host.docker.internal
+      - CCAT_POSTGRESQL_PORT=5433
+      - CCAT_POSTGRESQL_USER=postgres
+      - CCAT_POSTGRESQL_PASSWORD=password
+      - CCAT_POSTGRESQL_DB=vectordb
+      # - EMBEDDER_SIZE=1536 # because I have OpenAI's Embedder which has 1536 dimensions
+    env_file:
+      - .env
     volumes:
       - ./core:/app
     command:
       - python
       - "-m"
+      - "debugpy"
+      - "--listen"
+      - "0.0.0.0:5678"
+      - "--wait-for-client"
+      - "-m"
       - "cat.main"
-    restart: unless-stopped

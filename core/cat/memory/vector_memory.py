@@ -68,6 +68,8 @@ def create_vector_memory(embedder_name=None, embedder_size=None) -> VectorMemory
 
     The backend is selected via the CCAT_VECTOR_DB env variable.
     Supported values: 'qdrant' (default), 'postgresql'.
+
+    Each backend will have its own configuration via env variables (e.g. connection details).
     """
 
     vector_db_type = (get_env("CCAT_VECTOR_DB") or "qdrant").lower()

@@ -1,4 +1,6 @@
 import uuid
+import json
+import os
 from typing import Any, List, Iterable, Optional, Tuple
 
 from langchain.docstore.document import Document
@@ -33,6 +35,14 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
             embedder_name=embedder_name,
             embedder_size=embedder_size,
         )
+        self._hnsw_m = int(os.getenv("CCAT_POSTGRESQL_HNSW_M", "16"))
+        self._hnsw_ef_construction = int(
+            os.getenv("CCAT_POSTGRESQL_HNSW_EF_CONSTRUCTION", "64")
+        )
+        self._hnsw_operator_class = os.getenv(
+            "CCAT_POSTGRESQL_HNSW_OPERATOR_CLASS", "vector_cosine_ops"
+        )
+
         self.connection = connection
 
         self.create_db_collection_if_not_exists()
@@ -44,7 +54,9 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
     def _table_name(self) -> str:
         """Sanitized table name for this collection."""
         # Only allow alphanumeric and underscore
-        safe = "".join(c if c.isalnum() or c == "_" else "_" for c in self.collection_name)
+        safe = "".join(
+            c if c.isalnum() or c == "_" else "_" for c in self.collection_name
+        )
         return f"vector_{safe}"
 
     def create_db_collection_if_not_exists(self):
@@ -62,12 +74,13 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                 )
                 """
             )
-            # Index for approximate nearest neighbor search (IVFFlat)
+            # HNSW index creation
             cur.execute(
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_{self._table_name}_embedding
                 ON {self._table_name}
-                USING ivfflat (embedding vector_cosine_ops)
+                USING hnsw (embedding {self._hnsw_operator_class})
+                WITH (m={self._hnsw_m}, ef_construction={self._hnsw_ef_construction})
                 """
             )
             self.connection.commit()
@@ -76,9 +89,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
         """Check if current embedder matches. If not, recreate the table."""
         with self.connection.cursor() as cur:
             # Check stored embedder name
-            cur.execute(
-                f"SELECT embedder_name FROM {self._table_name} LIMIT 1"
-            )
+            cur.execute(f"SELECT embedder_name FROM {self._table_name} LIMIT 1")
             row = cur.fetchone()
 
             if row is not None and row[0] != self.embedder_name:
@@ -121,7 +132,13 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     metadata = EXCLUDED.metadata,
                     embedder_name = EXCLUDED.embedder_name
                 """,
-                (point_id, str(vector_list), content, metadata, self.embedder_name),
+                (
+                    point_id,
+                    str(vector_list),
+                    content,
+                    json.dumps(metadata) if metadata else None,
+                    self.embedder_name,
+                ),
             )
             self.connection.commit()
 
@@ -157,7 +174,11 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                         point_id,
                         str(list(vector)),
                         payload.get("page_content", ""),
-                        payload.get("metadata"),
+                        (
+                            json.dumps(payload.get("metadata"))
+                            if payload.get("metadata")
+                            else None
+                        ),
                         self.embedder_name,
                     ),
                 )
@@ -259,7 +280,11 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
             results = []
             for row in cur.fetchall():
                 point_id, page_content, meta, vec_str = row
-                vec = [float(x) for x in vec_str.strip("[]").split(",")] if vec_str else []
+                vec = (
+                    [float(x) for x in vec_str.strip("[]").split(",")]
+                    if vec_str
+                    else []
+                )
                 results.append(
                     VectorMemoryPoint(
                         id=point_id,
@@ -303,7 +328,11 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
             points = []
             for row in cur.fetchall():
                 point_id, page_content, meta, vec_str = row
-                vec = [float(x) for x in vec_str.strip("[]").split(",")] if vec_str else []
+                vec = (
+                    [float(x) for x in vec_str.strip("[]").split(",")]
+                    if vec_str
+                    else []
+                )
                 points.append(
                     VectorMemoryPoint(
                         id=point_id,
