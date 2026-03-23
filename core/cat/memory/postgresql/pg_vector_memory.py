@@ -57,8 +57,10 @@ class PostgreSQLVectorMemory(VectorMemory):
             with conn.cursor() as cur:
                 cur.execute(f"CREATE SCHEMA IF NOT EXISTS {safe_schema}")
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error creating schema: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self.pool.putconn(conn)
@@ -103,8 +105,10 @@ class PostgreSQLVectorMemory(VectorMemory):
             with conn.cursor() as cur:
                 cur.execute(f"DROP TABLE IF EXISTS {table_name}")
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in delete_collection: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self.pool.putconn(conn)
@@ -125,8 +129,10 @@ class PostgreSQLVectorMemory(VectorMemory):
             with conn.cursor() as cur:
                 cur.execute(f"SELECT COUNT(*) FROM {table_name}")
                 count = cur.fetchone()[0]
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in get_collection: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self.pool.putconn(conn)

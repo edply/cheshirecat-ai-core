@@ -91,8 +91,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     """
                 )
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in create_db_collection_if_not_exists: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -120,8 +122,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     log.debug(
                         f'Collection "{self.collection_name}" embedder check passed'
                     )
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in check_embedding_size: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -167,8 +171,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     ),
                 )
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in add_point: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -216,8 +222,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                         ),
                     )
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in add_points_batch: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -240,12 +248,17 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     f"DELETE FROM {self._table_name} {where_clause}",
                     values,
                 )
+                deleted = cur.rowcount
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in delete_points_by_metadata_filter: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
+
+        return deleted
 
     def delete_points(self, points_ids):
         if not points_ids:
@@ -259,8 +272,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     points_ids,
                 )
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in delete_points: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -305,8 +320,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                             point_id,
                         )
                     )
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in recall_memories_from_embedding: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -347,8 +364,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                             },
                         )
                     )
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in get_points: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
@@ -402,8 +421,10 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                             },
                         )
                     )
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            log.error(f"PostgreSQL error in get_all_points: {e}")
+            if not conn.closed:
+                conn.rollback()
             raise
         finally:
             self._vector_memory.put_connection(conn)
