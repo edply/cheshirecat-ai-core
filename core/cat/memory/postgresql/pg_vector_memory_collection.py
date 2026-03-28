@@ -40,9 +40,6 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
 
         self._vector_memory = vector_memory
 
-        self.create_db_collection_if_not_exists()
-        self.check_embedding_size()
-
         self._log_queries = get_env("CCAT_POSTGRESQL_LOG_QUERIES") == "true"
 
         log.debug(f"PostgreSQL collection '{self.collection_name}' ready")
@@ -66,79 +63,21 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
     @property
     def _table_name(self) -> str:
         """Schema-qualified, sanitized table name for this collection."""
-        safe = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self.collection_name
-        )
-        safe_schema = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self._schema
-        )
+        safe = "".join(c if c.isalnum() or c == "_" else "_" for c in self.collection_name)
+        safe_schema = "".join(c if c.isalnum() or c == "_" else "_" for c in self._schema)
         return f"{safe_schema}.vector_{safe}"
 
     def create_db_collection_if_not_exists(self):
-        """Create the pgvector table if it doesn't exist."""
-        conn = self._vector_memory.get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                cur.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS {self._table_name} (
-                        id TEXT PRIMARY KEY,
-                        embedding vector({self.embedder_size}),
-                        page_content TEXT,
-                        metadata JSONB,
-                        embedder_name TEXT
-                    )
-                    """
-                )
-                # HNSW index creation
-            conn.commit()
-        except Exception as e:
-            log.error(f"PostgreSQL error in create_db_collection_if_not_exists: {e}")
-            if not conn.closed:
-                conn.rollback()
-            raise
-        finally:
-            self._vector_memory.put_connection(conn)
+        """No-op: the database schema and tables must be created externally."""
+        pass
 
     def check_embedding_size(self):
-        """Check if current embedder matches. If not, recreate the table."""
-        conn = self._vector_memory.get_connection()
-        try:
-            with conn.cursor() as cur:
-                # Check stored embedder name
-                cur.execute(f"SELECT embedder_name FROM {self._table_name} LIMIT 1")
-                row = cur.fetchone()
-
-                if row is not None and row[0] != self.embedder_name:
-                    log.warning(
-                        f'Collection "{self.collection_name}" has a different embedder '
-                        f"(stored: {row[0]}, current: {self.embedder_name}). Recreating."
-                    )
-                    if get_env("CCAT_SAVE_MEMORY_SNAPSHOTS") == "true":
-                        self.save_dump()
-
-                    cur.execute(f"DROP TABLE IF EXISTS {self._table_name}")
-                    conn.commit()
-                else:
-                    log.debug(
-                        f'Collection "{self.collection_name}" embedder check passed'
-                    )
-        except Exception as e:
-            log.error(f"PostgreSQL error in check_embedding_size: {e}")
-            if not conn.closed:
-                conn.rollback()
-            raise
-        finally:
-            self._vector_memory.put_connection(conn)
-
-        # Recreate outside the previous connection scope
-        if row is not None and row[0] != self.embedder_name:
-            self.create_collection()
+        """No-op: embedder compatibility must be managed externally."""
+        pass
 
     def create_collection(self):
-        """Drop and recreate the collection table."""
-        self.create_db_collection_if_not_exists()
+        """No-op: collections must be created externally."""
+        pass
 
     def add_point(
         self,
@@ -215,11 +154,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                             point_id,
                             str(list(vector)),
                             payload.get("page_content", ""),
-                            (
-                                json.dumps(payload.get("metadata"))
-                                if payload.get("metadata")
-                                else None
-                            ),
+                            (json.dumps(payload.get("metadata")) if payload.get("metadata") else None),
                             self.embedder_name,
                         ),
                     )
@@ -354,12 +289,12 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
 
         where_clause, where_values = self._build_where_from_metadata(metadata)
 
-        safe_schema = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self._schema
-        )
+        safe_schema = "".join(c if c.isalnum() or c == "_" else "_" for c in self._schema)
         immutable_unaccent_fn = f"{safe_schema}.immutable_unaccent"
 
-        fts_condition = f"page_content_fts_vector @@ websearch_to_tsquery(%s, {immutable_unaccent_fn}(coalesce(%s, '')))"
+        fts_condition = (
+            f"page_content_fts_vector @@ websearch_to_tsquery(%s, {immutable_unaccent_fn}(coalesce(%s, '')))"
+        )
         fts_rank = f"ts_rank_cd(page_content_fts_vector, websearch_to_tsquery(%s, {immutable_unaccent_fn}(coalesce(%s, ''))), 34)"
 
         if where_clause:
@@ -375,12 +310,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
             LIMIT %s
         """
         # Parameters: where_values + fts_condition params + fts_rank params + limit
-        params = (
-            where_values
-            + [fts_language, fts_query]
-            + [fts_language, fts_query]
-            + [k_fts]
-        )
+        params = where_values + [fts_language, fts_query] + [fts_language, fts_query] + [k_fts]
 
         results = []
         conn = self._vector_memory.get_connection()
@@ -393,11 +323,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     if fts_threshold is not None and score < fts_threshold:
                         continue
 
-                    vector_embeddings = (
-                        [float(x) for x in vec_str.strip("[]").split(",")]
-                        if vec_str
-                        else []
-                    )
+                    vector_embeddings = [float(x) for x in vec_str.strip("[]").split(",")] if vec_str else []
                     results.append(
                         (
                             Document(
@@ -441,9 +367,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
         """
         # Fast path: FTS disabled → pure semantic
         if k_fts <= 0 or not fts_query:
-            return self.recall_memories_from_embedding(
-                embedding, metadata=metadata, k=k, threshold=threshold
-            )
+            return self.recall_memories_from_embedding(embedding, metadata=metadata, k=k, threshold=threshold)
 
         vector_str = str(list(embedding))
         where_clause, where_values = self._build_where_from_metadata(metadata)
@@ -461,12 +385,12 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
         semantic_params = [vector_str] + where_values + [vector_str, k]
 
         # --- FTS CTE -----------------------------------------------------
-        safe_schema = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self._schema
-        )
+        safe_schema = "".join(c if c.isalnum() or c == "_" else "_" for c in self._schema)
         immutable_unaccent_fn = f"{safe_schema}.immutable_unaccent"
 
-        fts_condition = f"page_content_fts_vector @@ websearch_to_tsquery(%s, {immutable_unaccent_fn}(coalesce(%s, '')))"
+        fts_condition = (
+            f"page_content_fts_vector @@ websearch_to_tsquery(%s, {immutable_unaccent_fn}(coalesce(%s, '')))"
+        )
         fts_rank = f"ts_rank_cd(page_content_fts_vector, websearch_to_tsquery(%s, {immutable_unaccent_fn}(coalesce(%s, ''))), 34)"
 
         if where_clause:
@@ -511,12 +435,13 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                     if source == "fts" and fts_threshold is not None and score < fts_threshold:
                         continue
 
-                    vec = (
-                        [float(x) for x in vec_str.strip("[]").split(",")]
-                        if vec_str
-                        else []
+                    vec = [float(x) for x in vec_str.strip("[]").split(",")] if vec_str else []
+                    doc_tuple = (
+                        Document(page_content=page_content or "", metadata=meta or {}),
+                        float(score),
+                        vec,
+                        row_id,
                     )
-                    doc_tuple = (Document(page_content=page_content or "", metadata=meta or {}), float(score), vec, row_id)
                     if source == "semantic":
                         semantic_results.append(doc_tuple)
                     else:
@@ -529,9 +454,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
         finally:
             self._vector_memory.put_connection(conn)
 
-        log.info(
-            f"Hybrid recall results: {len(semantic_results)} semantic, {len(fts_results)} FTS-only"
-        )
+        log.info(f"Hybrid recall results: {len(semantic_results)} semantic, {len(fts_results)} FTS-only")
         return semantic_results + fts_results
 
     def get_points(self, ids: List[str]) -> List[VectorMemoryPoint]:
@@ -553,11 +476,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                 results = []
                 for row in cur.fetchall():
                     point_id, page_content, meta, vec_str = row
-                    vec = (
-                        [float(x) for x in vec_str.strip("[]").split(",")]
-                        if vec_str
-                        else []
-                    )
+                    vec = [float(x) for x in vec_str.strip("[]").split(",")] if vec_str else []
                     results.append(
                         VectorMemoryPoint(
                             id=point_id,
@@ -610,11 +529,7 @@ class PostgreSQLVectorMemoryCollection(VectorMemoryCollection):
                 points = []
                 for row in cur.fetchall():
                     point_id, page_content, meta, vec_str = row
-                    vec = (
-                        [float(x) for x in vec_str.strip("[]").split(",")]
-                        if vec_str
-                        else []
-                    )
+                    vec = [float(x) for x in vec_str.strip("[]").split(",")] if vec_str else []
                     points.append(
                         VectorMemoryPoint(
                             id=point_id,

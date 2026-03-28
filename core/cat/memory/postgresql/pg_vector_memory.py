@@ -36,9 +36,7 @@ class PostgreSQLVectorMemory(VectorMemory):
             f"(schema: {self.schema}, pool: {self._min_conn}-{self._max_conn})"
         )
 
-        safe_schema = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self.schema
-        )
+        safe_schema = "".join(c if c.isalnum() or c == "_" else "_" for c in self.schema)
 
         self.pool = pool.ThreadedConnectionPool(
             minconn=self._min_conn,
@@ -50,20 +48,6 @@ class PostgreSQLVectorMemory(VectorMemory):
             dbname=self._dbname,
             options=f"-c search_path={safe_schema},public",
         )
-
-        # Create schema if it doesn't exist
-        conn = self.pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(f"CREATE SCHEMA IF NOT EXISTS {safe_schema}")
-            conn.commit()
-        except Exception as e:
-            log.error(f"PostgreSQL error creating schema: {e}")
-            if not conn.closed:
-                conn.rollback()
-            raise
-        finally:
-            self.pool.putconn(conn)
 
     def get_connection(self):
         """Get a healthy connection from the pool.
@@ -116,12 +100,8 @@ class PostgreSQLVectorMemory(VectorMemory):
 
     def delete_collection(self, collection_name: str):
         """Delete a collection (drop the table)."""
-        safe_name = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in collection_name
-        )
-        safe_schema = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self.schema
-        )
+        safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in collection_name)
+        safe_schema = "".join(c if c.isalnum() or c == "_" else "_" for c in self.schema)
         table_name = f"{safe_schema}.vector_{safe_name}"
         conn = self.pool.getconn()
         try:
@@ -140,12 +120,8 @@ class PostgreSQLVectorMemory(VectorMemory):
 
     def get_collection(self, collection_name: str) -> CollectionInfo:
         """Get collection info."""
-        safe_name = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in collection_name
-        )
-        safe_schema = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in self.schema
-        )
+        safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in collection_name)
+        safe_schema = "".join(c if c.isalnum() or c == "_" else "_" for c in self.schema)
         table_name = f"{safe_schema}.vector_{safe_name}"
         conn = self.pool.getconn()
         try:
