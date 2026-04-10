@@ -187,6 +187,70 @@ class TestCombinedFilter:
             "value4",
         ]
 
+    def test_must_and_should_generic_translation(self):
+        f = {
+            "must": [
+                {"key": "metadata.group", "match": {"value": "value_a"}},
+            ],
+            "should": [
+                {
+                    "must": [
+                        {"key": "metadata.kind", "match": {"value": "value_b"}},
+                    ]
+                },
+                {
+                    "must": [
+                        {"key": "metadata.kind", "match": {"value": "value_c"}},
+                    ]
+                },
+            ],
+        }
+        sql, params = build_pg_filter_clause(f)
+        assert (
+            sql
+            == "(metadata->>%s = %s) AND ((metadata->>%s = %s) OR (metadata->>%s = %s))"
+        )
+        assert params == [
+            "group",
+            "value_a",
+            "kind",
+            "value_b",
+            "kind",
+            "value_c",
+        ]
+
+    def test_must_and_should_domain_type_style_translation(self):
+        f = {
+            "must": [
+                {"key": "metadata.category", "match": {"value": "alpha"}},
+            ],
+            "should": [
+                {
+                    "must": [
+                        {"key": "metadata.source_kind", "match": {"value": "type_one"}},
+                    ]
+                },
+                {
+                    "must": [
+                        {"key": "metadata.source_kind", "match": {"value": "type_two"}},
+                    ]
+                },
+            ],
+        }
+        sql, params = build_pg_filter_clause(f)
+        assert (
+            sql
+            == "(metadata->>%s = %s) AND ((metadata->>%s = %s) OR (metadata->>%s = %s))"
+        )
+        assert params == [
+            "category",
+            "alpha",
+            "source_kind",
+            "type_one",
+            "source_kind",
+            "type_two",
+        ]
+
     def test_must_should_must_not(self):
         f = {
             "must": [{"key": "metadata.key1", "match": {"value": "value1"}}],
@@ -256,6 +320,47 @@ class TestNestedGroups:
             "value4",
             "key8",
             "value8",
+        ]
+
+    def test_nested_group_with_identifier_and_is_empty(self):
+        f = {
+            "must": [
+                {
+                    "must": [
+                        {"key": "metadata.category", "match": {"value": "alpha"}},
+                    ],
+                    "should": [
+                        {
+                            "must": [
+                                {"key": "metadata.source_kind", "match": {"value": "type_one"}},
+                            ]
+                        },
+                        {
+                            "must": [
+                                {"key": "metadata.source_kind", "match": {"value": "type_two"}},
+                            ]
+                        },
+                    ],
+                },
+                {"key": "metadata.record_id", "match": {"value": "resource-123"}},
+                {"is_empty": {"key": "metadata.flag"}},
+            ]
+        }
+        sql, params = build_pg_filter_clause(f)
+        assert (
+            sql
+            == "((metadata->>%s = %s) AND ((metadata->>%s = %s) OR (metadata->>%s = %s)) AND metadata->>%s = %s AND NOT (metadata ? %s))"
+        )
+        assert params == [
+            "category",
+            "alpha",
+            "source_kind",
+            "type_one",
+            "source_kind",
+            "type_two",
+            "record_id",
+            "resource-123",
+            "flag",
         ]
 
 
@@ -367,11 +472,14 @@ class TestExtendedLeafConditions:
     def test_is_empty_jsonb(self):
         cond = {"is_empty": {"key": "metadata.reports"}}
         sql, params = build_pg_leaf_condition(cond)
-        assert sql == (
-            "(metadata->%s IS NULL OR jsonb_typeof(metadata->%s) = 'null' "
-            "OR metadata->%s = '[]'::jsonb)"
-        )
-        assert params == ["reports", "reports", "reports"]
+        assert sql == "NOT (metadata ? %s)"
+        assert params == ["reports"]
+
+    def test_is_empty_nested_jsonb(self):
+        cond = {"is_empty": {"key": "metadata.parent.child"}}
+        sql, params = build_pg_leaf_condition(cond)
+        assert sql == "NOT jsonb_path_exists(metadata, %s)"
+        assert params == ['$."parent"."child"']
 
     def test_is_null_jsonb(self):
         cond = {"is_null": {"key": "metadata.reports"}}

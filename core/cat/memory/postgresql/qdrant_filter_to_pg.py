@@ -30,6 +30,7 @@ Behaviour notes
     values and JSON arrays.
 - JSONB numeric/datetime ranges are guarded so invalid values become
     non-matching instead of raising cast errors.
+- For JSONB metadata, ``is_empty`` is implemented as "field does not exist".
 - For promoted columns, ``is_empty`` and ``is_null`` both map to ``IS NULL``;
     promoted-column storage cannot distinguish a missing key from an explicit
     null value.
@@ -52,7 +53,6 @@ falling back to a no-op SQL predicate.
 from __future__ import annotations
 
 from typing import Any, Iterable, List, Optional, Set, Tuple
-
 
 NUMERIC_REGEX = r"^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$"
 TIMESTAMP_REGEX = (
@@ -81,6 +81,11 @@ def _normalize_qdrant_key(key: str) -> List[str]:
         raise ValueError(f"Invalid Qdrant filter key: {key!r}")
 
     return parts
+
+
+def _to_jsonpath(parts: List[str]) -> str:
+    escaped_parts = [part.replace('"', '\\"') for part in parts]
+    return "$" + "".join(f'."{part}"' for part in escaped_parts)
 
 
 def _parse_qdrant_key(
@@ -329,25 +334,16 @@ def _build_pg_is_empty_condition(
     key: str,
     promoted_cols: Optional[Iterable[str]] = None,
 ) -> Tuple[str, List[Any]]:
-    json_sql, json_params, promoted = _parse_qdrant_key(
-        key,
-        promoted_cols=promoted_cols,
-        as_jsonb=True,
-    )
+    parts = _normalize_qdrant_key(key)
+    promoted = _normalize_promoted_cols(promoted_cols)
 
-    if promoted:
-        return f"{json_sql} IS NULL", []
+    if promoted and len(parts) == 1 and parts[0] in promoted:
+        return f"{parts[0]} IS NULL", []
 
-    sql = (
-        "("
-        f"{json_sql} IS NULL "
-        "OR "
-        f"jsonb_typeof({json_sql}) = 'null' "
-        "OR "
-        f"{json_sql} = '[]'::jsonb"
-        ")"
-    )
-    return sql, json_params + json_params + json_params
+    if len(parts) == 1:
+        return "NOT (metadata ? %s)", [parts[0]]
+
+    return "NOT jsonb_path_exists(metadata, %s)", [_to_jsonpath(parts)]
 
 
 def _build_pg_is_null_condition(
